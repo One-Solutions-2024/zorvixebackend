@@ -1,71 +1,99 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express');
-const fs = require('fs');
-const cors = require('cors');
+const { Pool } = require('pg');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-let formData = {
-    contacts: [],
-    newsletters: []
+// Enable SSL always if connecting to an external database like Render
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+// Initialize the database: create tables if they don't exist already
+const initializeDatabase = async () => {
+  try {
+    // Create contacts table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        email VARCHAR(255),
+        subject TEXT,
+        message TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create newsletters table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS newsletters (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255),
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    console.log("Database initialized successfully.");
+  } catch (error) {
+    console.error("Error initializing database:", error.message);
+  }
 };
 
-// Load existing data
-try {
-    const data = fs.readFileSync('data.json');
-    formData = JSON.parse(data);
-} catch (err) {
-    console.log('No existing data file, starting fresh');
-}
+initializeDatabase();
 
-// Your contact form route
-app.post('/submit-contact', (req, res) => {
-    try {
-        const { name, email, subject, message } = req.body;
-        const newContact = {
-            id: Date.now(),
-            name,
-            email,
-            subject,
-            message,
-            timestamp: new Date().toISOString()
-        };
-        formData.contacts.push(newContact);
-        saveData();
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
+// Submit a contact
+app.post('/submit-contact', async (req, res) => {
+  const { name, email, subject, message } = req.body;
+  try {
+    const query = `
+      INSERT INTO contacts (name, email, subject, message, timestamp)
+      VALUES ($1, $2, $3, $4, NOW())
+      RETURNING *;
+    `;
+    const result = await pool.query(query, [name, email, subject, message]);
+    res.json({ success: true, contact: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
-app.post('/submit-newsletter', (req, res) => {
-    try {
-        const { email } = req.body;
-        const newSubscription = {
-            id: Date.now(),
-            email,
-            timestamp: new Date().toISOString()
-        };
-        formData.newsletters.push(newSubscription);
-        saveData();
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-});
-// Data retrieval endpoint
-app.get('/get-data', (req, res) => {
-    res.json(formData);
+// Submit a newsletter subscription
+app.post('/submit-newsletter', async (req, res) => {
+  const { email } = req.body;
+  try {
+    const query = `
+      INSERT INTO newsletters (email, timestamp)
+      VALUES ($1, NOW())
+      RETURNING *;
+    `;
+    const result = await pool.query(query, [email]);
+    res.json({ success: true, subscription: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
-function saveData() {
-    fs.writeFileSync('data.json', JSON.stringify(formData, null, 2));
-}
+// Retrieve all data
+app.get('/get-data', async (req, res) => {
+  try {
+    const contactsResult = await pool.query('SELECT * FROM contacts ORDER BY timestamp DESC;');
+    const newslettersResult = await pool.query('SELECT * FROM newsletters ORDER BY timestamp DESC;');
+    res.json({
+      contacts: contactsResult.rows,
+      newsletters: newslettersResult.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 const PORT = 5000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
