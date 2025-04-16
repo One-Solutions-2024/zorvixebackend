@@ -25,26 +25,37 @@ try {
 app.post('/submit-contact', (req, res) => {
     try {
         const { name, email, subject, message } = req.body;
-        // Add your processing logic here
-        console.log('Received contact form submission:', { name, email, subject, message });
+        const newContact = {
+            id: Date.now(),
+            name,
+            email,
+            subject,
+            message,
+            timestamp: new Date().toISOString()
+        };
+        formData.contacts.push(newContact);
+        saveData();
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-// Your newsletter route
 app.post('/submit-newsletter', (req, res) => {
     try {
         const { email } = req.body;
-        // Add your processing logic here
-        console.log('Received newsletter subscription:', email);
+        const newSubscription = {
+            id: Date.now(),
+            email,
+            timestamp: new Date().toISOString()
+        };
+        formData.newsletters.push(newSubscription);
+        saveData();
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-
 // Data retrieval endpoint
 app.get('/get-data', (req, res) => {
     res.json(formData);
